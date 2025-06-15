@@ -16,7 +16,40 @@ func crlfToLF(b []byte) []byte {
 
 // Modifier provides access to Macros, Headers and Body data to callback handlers. It also defines a
 // number of functions that can be used by callback handlers to modify processing of the email message
-type Modifier struct {
+type Modifier interface {
+	// AddRecipient appends a new envelope recipient for current message
+	AddRecipient(r string) error
+
+	// DeleteRecipient removes an envelope recipient address from message
+	DeleteRecipient(r string) error
+
+	// ReplaceBody substitutes message body with provided body
+	ReplaceBody(body []byte) error
+
+	// AddHeader appends a new email message header the message
+	AddHeader(name, value string) error
+
+	// ChangeHeader replaces the header at the specified position with a new one.
+	// The index is per name.
+	ChangeHeader(index int, name, value string) error
+
+	// InsertHeader inserts the header at the specified position
+	InsertHeader(index int, name, value string) error
+
+	// Quarantine a message by giving a reason to hold it
+	Quarantine(reason string) error
+
+	// ChangeFrom replaces the FROM envelope header with a new one
+	ChangeFrom(value string) error
+
+	// GetMacros returns Macros
+	GetMacros() map[string]string
+
+	// GetHeaders returns Headers
+	GetHeaders() textproto.MIMEHeader
+}
+
+type modifier struct {
 	Macros  map[string]string
 	Headers textproto.MIMEHeader
 
@@ -24,25 +57,25 @@ type Modifier struct {
 }
 
 // AddRecipient appends a new envelope recipient for current message
-func (m *Modifier) AddRecipient(r string) error {
+func (m *modifier) AddRecipient(r string) error {
 	data := []byte(fmt.Sprintf("<%s>", r) + null)
 	return m.writePacket(NewResponse('+', data).Response())
 }
 
 // DeleteRecipient removes an envelope recipient address from message
-func (m *Modifier) DeleteRecipient(r string) error {
+func (m *modifier) DeleteRecipient(r string) error {
 	data := []byte(fmt.Sprintf("<%s>", r) + null)
 	return m.writePacket(NewResponse('-', data).Response())
 }
 
 // ReplaceBody substitutes message body with provided body
-func (m *Modifier) ReplaceBody(body []byte) error {
+func (m *modifier) ReplaceBody(body []byte) error {
 	body = crlfToLF(body)
 	return m.writePacket(NewResponse('b', body).Response())
 }
 
 // AddHeader appends a new email message header the message
-func (m *Modifier) AddHeader(name, value string) error {
+func (m *modifier) AddHeader(name, value string) error {
 	var buffer bytes.Buffer
 	buffer.WriteString(name + null)
 	buffer.Write(crlfToLF([]byte(value)))
@@ -51,13 +84,13 @@ func (m *Modifier) AddHeader(name, value string) error {
 }
 
 // Quarantine a message by giving a reason to hold it
-func (m *Modifier) Quarantine(reason string) error {
+func (m *modifier) Quarantine(reason string) error {
 	return m.writePacket(NewResponse('q', []byte(reason+null)).Response())
 }
 
 // ChangeHeader replaces the header at the specified position with a new one.
 // The index is per name.
-func (m *Modifier) ChangeHeader(index int, name, value string) error {
+func (m *modifier) ChangeHeader(index int, name, value string) error {
 	var buffer bytes.Buffer
 	if err := binary.Write(&buffer, binary.BigEndian, uint32(index)); err != nil {
 		return err
@@ -69,7 +102,7 @@ func (m *Modifier) ChangeHeader(index int, name, value string) error {
 }
 
 // InsertHeader inserts the header at the specified position
-func (m *Modifier) InsertHeader(index int, name, value string) error {
+func (m *modifier) InsertHeader(index int, name, value string) error {
 	var buffer bytes.Buffer
 	if err := binary.Write(&buffer, binary.BigEndian, uint32(index)); err != nil {
 		return err
@@ -81,14 +114,24 @@ func (m *Modifier) InsertHeader(index int, name, value string) error {
 }
 
 // ChangeFrom replaces the FROM envelope header with a new one
-func (m *Modifier) ChangeFrom(value string) error {
+func (m *modifier) ChangeFrom(value string) error {
 	data := []byte(value + null)
 	return m.writePacket(NewResponse('e', data).Response())
 }
 
+// GetMacros returns Macros
+func (m *modifier) GetMacros() map[string]string {
+	return m.Macros
+}
+
+// GetHeaders returns Headers
+func (m *modifier) GetHeaders() textproto.MIMEHeader {
+	return m.Headers
+}
+
 // newModifier creates a new Modifier instance from milterSession
-func newModifier(s *milterSession) *Modifier {
-	return &Modifier{
+func newModifier(s *milterSession) Modifier {
+	return &modifier{
 		Macros:      s.macros,
 		Headers:     s.headers,
 		writePacket: s.WritePacket,
